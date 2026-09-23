@@ -1,0 +1,19 @@
+page "Control" {
+    connect PSU1.+ -> PLC1.L+
+    connect PSU1.- -> PLC1.M
+
+    connect PLC1.Q0.0 -> KM1.A1
+    connect KM1.A2 -> PSU1.-
+}
+
+page "Power" {
+    connect AC400.L1 -> KM1.1/L1
+    connect AC400.L2 -> KM1.3/L2
+    connect AC400.L3 -> KM1.5/L3
+
+    connect KM1.2/T1 -> M1.U
+    connect KM1.4/T2 -> M1.V
+    connect KM1.6/T3 -> M1.W
+
+    connect AC400.PE -> M1.PE
+}

@@ -1,0 +1,5 @@
+motor M1 "Main motor" {
+    voltage 400VAC
+    phases 3
+    power 2.2kW
+}

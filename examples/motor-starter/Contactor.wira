@@ -1,0 +1,9 @@
+contactor KM1 "Motor contactor" {
+    coil A1 -> A2 {
+        voltage 24VDC
+    }
+
+    pole 1/L1 -> 2/T1
+    pole 3/L2 -> 4/T2
+    pole 5/L3 -> 6/T3
+}

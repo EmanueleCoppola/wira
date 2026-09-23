@@ -1,0 +1,9 @@
+power_supply PSU1 "Control power supply" {
+    input 230VAC
+    output 24VDC
+}
+
+supply AC400 "Three-phase power" {
+    voltage 400VAC
+    phases 3
+}

@@ -1,0 +1,7 @@
+project "Motor Starter"
+
+include "Power.wira"
+include "PLC.wira"
+include "Contactor.wira"
+include "Motor.wira"
+include "Pages.wira"

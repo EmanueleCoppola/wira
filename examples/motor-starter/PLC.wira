@@ -1,0 +1,5 @@
+plc PLC1 "Machine PLC" {
+    supply 24VDC
+
+    output Q0.0 "Motor contactor"
+}
