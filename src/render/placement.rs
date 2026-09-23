@@ -1,10 +1,18 @@
 use super::{
-    drawing::{Function, SymbolInstance},
-    geometry::GridPoint,
+    drawing::{Function, PoleGroup, SymbolInstance},
+    geometry::{Bounds, GridPoint, Point},
     symbols::{definition, id_for, SymbolId},
+    topology::PageTopology,
 };
 use crate::mvp_model::{Endpoint, Kind, Page, Project};
 use std::collections::HashSet;
+
+pub const PHASE_PITCH_COLS: i32 = 2;
+const FEEDER_PITCH_COLS: i32 = 16;
+const POWER_CENTER_COL: i32 = 37;
+const SOURCE_ROW: i32 = 15;
+const CONTACT_ROW: i32 = 23;
+const MOTOR_ROW: i32 = 34;
 
 pub fn select(project: &Project, page: &Page) -> Vec<Function> {
     let mut functions = Vec::new();
@@ -38,6 +46,7 @@ fn instance(
     origin: GridPoint,
     page_index: usize,
     pole_index: Option<usize>,
+    feeder_index: Option<usize>,
 ) -> SymbolInstance {
     SymbolInstance {
         device,
@@ -46,44 +55,102 @@ fn instance(
         origin,
         page_index,
         pole_index,
+        feeder_index,
         zone: zone(origin),
     }
 }
 
-pub fn place(project: &Project, page: &Page, page_index: usize) -> Vec<SymbolInstance> {
+pub fn place(
+    project: &Project,
+    page: &Page,
+    page_index: usize,
+    topology: &PageTopology,
+) -> Vec<SymbolInstance> {
+    let mut result = Vec::new();
+    let count = topology.feeders.len() as i32;
+    let first_center = POWER_CENTER_COL - (count - 1) * FEEDER_PITCH_COLS / 2;
+    let mut placed = HashSet::new();
+    for (feeder_index, feeder) in topology.feeders.iter().enumerate() {
+        let center = first_center + feeder_index as i32 * FEEDER_PITCH_COLS;
+        result.push(instance(
+            feeder.supply,
+            Function::Main(feeder.supply),
+            SymbolId::ThreePhaseSupply,
+            GridPoint::new(center, SOURCE_ROW),
+            page_index,
+            None,
+            Some(feeder_index),
+        ));
+        for phase in &feeder.phases {
+            let phase_number = ["L1", "L2", "L3"]
+                .iter()
+                .position(|&terminal| phase.source.terminal == terminal)
+                .expect("analyzed three-phase source") as i32;
+            let Kind::Contactor { poles, .. } = &project.devices[feeder.switch].kind else {
+                unreachable!("analyzed contactor")
+            };
+            let pole_index = poles
+                .iter()
+                .position(|pole| pole.from == phase.pole_input.terminal)
+                .expect("analyzed pole");
+            result.push(instance(
+                feeder.switch,
+                Function::Poles(feeder.switch),
+                SymbolId::ContactorContact,
+                GridPoint::new(center + (phase_number - 1) * PHASE_PITCH_COLS, CONTACT_ROW),
+                page_index,
+                Some(pole_index),
+                Some(feeder_index),
+            ));
+        }
+        result.push(instance(
+            feeder.motor,
+            Function::Main(feeder.motor),
+            SymbolId::Motor,
+            GridPoint::new(center, MOTOR_ROW),
+            page_index,
+            None,
+            Some(feeder_index),
+        ));
+        placed.extend([
+            Function::Main(feeder.supply),
+            Function::Poles(feeder.switch),
+            Function::Main(feeder.motor),
+        ]);
+    }
+
     let functions = select(project, page);
     let control = functions.iter().any(|f| matches!(f, Function::Coil(_)))
         && functions.iter().any(
             |f| matches!(f,Function::Main(i) if matches!(project.devices[*i].kind,Kind::Plc{..})),
         );
-    let power = functions.iter().any(|f| matches!(f, Function::Poles(_)))
-        && functions.iter().any(
-            |f| matches!(f,Function::Main(i) if matches!(project.devices[*i].kind,Kind::Motor{..})),
-        );
-    let mut result = Vec::new();
-    let mut fallback_col = 10;
-    let mut seen = HashSet::new();
+    let mut fallback_col = if topology.feeders.is_empty() {
+        10
+    } else {
+        10 + count * FEEDER_PITCH_COLS
+    };
     for f in functions {
+        if placed.contains(&f) {
+            continue;
+        }
         let device = match f {
             Function::Main(i) | Function::Coil(i) | Function::Poles(i) => i,
         };
-        if !seen.insert(f) {
-            continue;
-        }
         let d = &project.devices[device];
-        if power && matches!(f, Function::Poles(_)) {
+        if matches!(f, Function::Poles(_)) {
             if let Kind::Contactor { poles, .. } = &d.kind {
                 for (n, _) in poles.iter().enumerate() {
-                    let origin = GridPoint::new(25 + n as i32 * 12, 22);
                     result.push(instance(
                         device,
                         f,
                         SymbolId::ContactorContact,
-                        origin,
+                        GridPoint::new(fallback_col + n as i32 * PHASE_PITCH_COLS, CONTACT_ROW),
                         page_index,
                         Some(n),
+                        None,
                     ));
                 }
+                fallback_col += FEEDER_PITCH_COLS;
             }
             continue;
         }
@@ -99,24 +166,52 @@ pub fn place(project: &Project, page: &Page, page_index: usize) -> Vec<SymbolIns
                     GridPoint::new(x, 22)
                 }
             }
-        } else if power {
-            match symbol {
-                SymbolId::ThreePhaseSupply => GridPoint::new(37, 12),
-                SymbolId::Motor => GridPoint::new(37, 37),
-                _ => {
-                    let x = fallback_col;
-                    fallback_col += 15;
-                    GridPoint::new(x, 22)
-                }
-            }
         } else {
             let x = fallback_col;
             fallback_col += 15;
             GridPoint::new(x, 23)
         };
-        result.push(instance(device, f, symbol, origin, page_index, None));
+        result.push(instance(device, f, symbol, origin, page_index, None, None));
     }
     result
+}
+
+pub fn pole_groups(instances: &[SymbolInstance], topology: &PageTopology) -> Vec<PoleGroup> {
+    topology
+        .feeders
+        .iter()
+        .enumerate()
+        .map(|(feeder_index, feeder)| {
+            let mut members: Vec<_> = instances
+                .iter()
+                .enumerate()
+                .filter_map(|(index, instance)| {
+                    (instance.feeder_index == Some(feeder_index)
+                        && instance.symbol == SymbolId::ContactorContact)
+                        .then_some(index)
+                })
+                .collect();
+            members.sort_by_key(|&index| instances[index].origin.col);
+            let first = &instances[members[0]];
+            let last = &instances[*members.last().unwrap()];
+            let symbol_bounds = definition(SymbolId::ContactorContact).bounds;
+            let left = first.origin.mm().x + symbol_bounds.left;
+            let right = last.origin.mm().x + symbol_bounds.right;
+            let center_y = first.origin.mm().y;
+            PoleGroup {
+                device: feeder.switch,
+                feeder_index,
+                members: members.try_into().expect("three contact instances"),
+                bounds: Bounds::new(
+                    left,
+                    center_y + symbol_bounds.top,
+                    right,
+                    center_y + symbol_bounds.bottom,
+                ),
+                tag_anchor: Point::new(left - 3.0, center_y + 1.0),
+            }
+        })
+        .collect()
 }
 
 pub fn port(
@@ -124,7 +219,18 @@ pub fn port(
     project: &Project,
     endpoint: &Endpoint,
 ) -> Option<GridPoint> {
-    for instance in instances.iter().filter(|i| i.device == endpoint.device) {
+    port_in_feeder(instances, project, endpoint, None)
+}
+
+pub fn port_in_feeder(
+    instances: &[SymbolInstance],
+    project: &Project,
+    endpoint: &Endpoint,
+    feeder_index: Option<usize>,
+) -> Option<GridPoint> {
+    for instance in instances.iter().filter(|i| {
+        i.device == endpoint.device && (feeder_index.is_none() || i.feeder_index == feeder_index)
+    }) {
         let d = &project.devices[endpoint.device];
         let role = if instance.symbol == SymbolId::ContactorContact {
             let Kind::Contactor { poles, .. } = &d.kind else {

@@ -1,10 +1,9 @@
 use super::{
     drawing::{DrawCommand, SymbolInstance, WireRoute},
     geometry::{GridPoint, Point},
-    placement::port,
 };
-use crate::mvp_model::{Kind, Project};
-use std::collections::{BTreeMap, BTreeSet};
+use crate::mvp_model::Project;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 type Edge = (GridPoint, GridPoint);
 fn edge(a: GridPoint, b: GridPoint) -> Edge {
@@ -37,75 +36,114 @@ pub fn route_page(
     project: &Project,
     page_index: usize,
     instances: &[SymbolInstance],
+    topology: &super::topology::PageTopology,
 ) -> Vec<WireRoute> {
     let page = &project.pages[page_index];
-    let is_control = instances
+    let shared_nets: HashMap<_, _> = topology
+        .nets
         .iter()
-        .any(|i| matches!(i.symbol, super::symbols::SymbolId::ContactorCoil));
-    let is_power = instances
+        .filter(|net| net.endpoints.len() >= 3)
+        .flat_map(|net| {
+            net.endpoints
+                .iter()
+                .cloned()
+                .map(move |endpoint| (endpoint, net.id))
+        })
+        .collect();
+    let rail_row = instances
         .iter()
-        .any(|i| matches!(i.symbol, super::symbols::SymbolId::ContactorContact));
+        .map(|instance| {
+            instance.origin.row
+                + (super::symbols::definition(instance.symbol).bounds.bottom / 4.0).ceil() as i32
+        })
+        .max()
+        .unwrap_or(25)
+        + 7;
     page.connections
         .iter()
-        .filter_map(|c| {
-            let a = port(instances, project, &c.from)?;
-            let b = port(instances, project, &c.to)?;
-            let ka = &project.devices[c.from.device].kind;
-            let kb = &project.devices[c.to.device].kind;
-            let mut points = if is_control {
-                let is_return = |kind: &Kind, term: &str| {
-                    matches!(kind, Kind::PowerSupply { .. }) && term == "-"
-                        || matches!(kind, Kind::Plc { .. }) && term == "M"
-                        || matches!(kind, Kind::Contactor { .. }) && term == "A2"
-                };
-                if is_return(ka, &c.from.terminal) && is_return(kb, &c.to.terminal) {
-                    let branch = if matches!(ka, Kind::Plc { .. }) || matches!(kb, Kind::Plc { .. })
-                    {
-                        GridPoint::new(24, 32)
+        .filter_map(|connection| {
+            let feeder_index = topology
+                .feeders
+                .iter()
+                .enumerate()
+                .find_map(|(index, feeder)| {
+                    let same_pair =
+                        |a: &crate::mvp_model::Endpoint, b: &crate::mvp_model::Endpoint| {
+                            (connection.from == *a && connection.to == *b)
+                                || (connection.from == *b && connection.to == *a)
+                        };
+                    let phase = feeder.phases.iter().any(|path| {
+                        same_pair(&path.source, &path.pole_input)
+                            || same_pair(&path.pole_output, &path.motor)
+                    });
+                    let earth = feeder
+                        .protective_earth
+                        .as_ref()
+                        .is_some_and(|path| same_pair(&path.source, &path.motor));
+                    (phase || earth).then_some(index)
+                });
+            let a = super::placement::port_in_feeder(
+                instances,
+                project,
+                &connection.from,
+                feeder_index,
+            )?;
+            let b =
+                super::placement::port_in_feeder(instances, project, &connection.to, feeder_index)?;
+            let mut points = if let Some(index) = feeder_index {
+                if let Some(earth) = &topology.feeders[index].protective_earth {
+                    if connection.from == earth.source && a.col != b.col {
+                        vec![a, GridPoint::new(a.col, b.row), b]
+                    } else if connection.to == earth.source && a.col != b.col {
+                        vec![a, GridPoint::new(b.col, a.row), b]
                     } else {
-                        GridPoint::new(15, 32)
-                    };
-                    let down = |p: GridPoint| {
-                        if p.col < 20 {
-                            15
-                        } else if p.col > 40 {
-                            60
-                        } else {
-                            24
-                        }
-                    };
-                    vec![
-                        a,
-                        GridPoint::new(down(a), a.row),
-                        GridPoint::new(down(a), 32),
-                        branch,
-                        GridPoint::new(down(b), 32),
-                        GridPoint::new(down(b), b.row),
-                        b,
-                    ]
-                } else if matches!(ka, Kind::PowerSupply { .. }) && c.from.terminal == "+" {
-                    vec![a, GridPoint::new(20, a.row), GridPoint::new(20, b.row), b]
+                        vec![a, b]
+                    }
                 } else {
-                    vec![
-                        a,
-                        GridPoint::new((a.col + b.col) / 2, a.row),
-                        GridPoint::new((a.col + b.col) / 2, b.row),
-                        b,
-                    ]
-                }
-            } else if is_power {
-                if a.col == b.col {
                     vec![a, b]
-                } else {
-                    vec![a, GridPoint::new(a.col, b.row), b]
                 }
-            } else if a.row == b.row || a.col == b.col {
+            } else if shared_nets.contains_key(&connection.from)
+                && shared_nets.get(&connection.from) == shared_nets.get(&connection.to)
+            {
+                let tap = |endpoint: &crate::mvp_model::Endpoint, port: GridPoint| {
+                    let direction = instances
+                        .iter()
+                        .filter(|instance| instance.device == endpoint.device)
+                        .find_map(|instance| {
+                            super::symbols::definition(instance.symbol)
+                                .ports
+                                .into_iter()
+                                .find(|symbol_port| symbol_port.role == endpoint.terminal)
+                                .map(|p| p.direction)
+                        });
+                    match direction {
+                        Some(super::symbols::PortDirection::Left) => port.col - 3,
+                        Some(super::symbols::PortDirection::Right) => port.col + 2,
+                        _ => port.col,
+                    }
+                };
+                let x1 = tap(&connection.from, a);
+                let x2 = tap(&connection.to, b);
+                vec![
+                    a,
+                    GridPoint::new(x1, a.row),
+                    GridPoint::new(x1, rail_row),
+                    GridPoint::new(x2, rail_row),
+                    GridPoint::new(x2, b.row),
+                    b,
+                ]
+            } else if a.col == b.col || a.row == b.row {
                 vec![a, b]
             } else {
-                vec![a, GridPoint::new(b.col, a.row), b]
+                let mid = (a.col + b.col) / 2;
+                vec![a, GridPoint::new(mid, a.row), GridPoint::new(mid, b.row), b]
             };
             compact(&mut points);
-            Some(route(points, c.from.clone(), c.to.clone()))
+            Some(route(
+                points,
+                connection.from.clone(),
+                connection.to.clone(),
+            ))
         })
         .collect()
 }

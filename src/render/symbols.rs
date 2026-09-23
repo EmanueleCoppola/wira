@@ -132,41 +132,39 @@ pub fn definition(id: SymbolId) -> SymbolDefinition {
             vec![anchor(DeviceTag, 0.0, -15.0)],
         ),
         Motor => (
-            Bounds::new(-48.0, -28.0, 53.0, 15.0),
+            Bounds::new(-9.0, -12.0, 20.0, 8.0),
             vec![
-                circle(0.0, 0.0, 13.0),
-                line((-48.0, -28.0), (-48.0, -19.0)),
-                line((-48.0, -19.0), (-10.0, -8.0)),
-                line((0.0, -28.0), (0.0, -13.0)),
-                line((48.0, -28.0), (48.0, -19.0)),
-                line((48.0, -19.0), (10.0, -8.0)),
-                line((13.0, 0.0), (48.0, 0.0)),
-                line((48.0, 0.0), (48.0, 5.0)),
-                line((43.0, 5.0), (53.0, 5.0)),
-                line((45.0, 7.0), (51.0, 7.0)),
-                line((47.0, 9.0), (49.0, 9.0)),
+                circle(0.0, 0.0, 9.0),
+                line((-8.0, -12.0), (-8.0, -4.1231055)),
+                line((0.0, -12.0), (0.0, -9.0)),
+                line((8.0, -12.0), (8.0, -4.1231055)),
+                line((9.0, 0.0), (16.0, 0.0)),
+                line((16.0, 0.0), (16.0, 4.0)),
+                line((12.0, 4.0), (20.0, 4.0)),
+                line((13.5, 6.0), (18.5, 6.0)),
+                line((15.0, 8.0), (17.0, 8.0)),
             ],
             vec![
-                port("U", -12, -7, Up),
-                port("V", 0, -7, Up),
-                port("W", 12, -7, Up),
-                port("PE", 12, 0, Right),
+                port("U", -2, -3, Up),
+                port("V", 0, -3, Up),
+                port("W", 2, -3, Up),
+                port("PE", 4, 0, Right),
             ],
             vec![anchor(DeviceTag, 0.0, 20.0), anchor(Rating, 0.0, 25.0)],
         ),
         ThreePhaseSupply => (
-            Bounds::new(-48.0, -5.0, 96.0, 5.0),
+            Bounds::new(-8.0, -4.0, 20.0, 0.0),
             vec![
-                line((-48.0, -4.0), (-48.0, 0.0)),
+                line((-8.0, -4.0), (-8.0, 0.0)),
                 line((0.0, -4.0), (0.0, 0.0)),
-                line((48.0, -4.0), (48.0, 0.0)),
-                line((96.0, -4.0), (96.0, 0.0)),
+                line((8.0, -4.0), (8.0, 0.0)),
+                line((20.0, -4.0), (20.0, 0.0)),
             ],
             vec![
-                port("L1", -12, 0, Down),
+                port("L1", -2, 0, Down),
                 port("L2", 0, 0, Down),
-                port("L3", 12, 0, Down),
-                port("PE", 24, 0, Down),
+                port("L3", 2, 0, Down),
+                port("PE", 5, 0, Down),
             ],
             vec![anchor(DeviceTag, 0.0, -10.0), anchor(Rating, 0.0, -6.0)],
         ),
@@ -224,5 +222,60 @@ mod tests {
                     .any(|a| a.role == PropertyRole::DeviceTag));
             }
         }
+    }
+
+    #[test]
+    fn three_phase_symbols_use_compact_grid_geometry() {
+        let supply = definition(SymbolId::ThreePhaseSupply);
+        assert_eq!(
+            supply
+                .ports
+                .iter()
+                .map(|p| (p.role.as_str(), p.anchor))
+                .collect::<Vec<_>>(),
+            [
+                ("L1", GridPoint::new(-2, 0)),
+                ("L2", GridPoint::new(0, 0)),
+                ("L3", GridPoint::new(2, 0)),
+                ("PE", GridPoint::new(5, 0)),
+            ]
+        );
+        for (graphic, x) in supply.graphics.iter().zip([-8.0, 0.0, 8.0, 20.0]) {
+            assert_eq!(
+                *graphic,
+                line((x, -4.0), (x, 0.0)),
+                "supply stubs must be short and vertical"
+            );
+        }
+        assert_eq!(supply.bounds, Bounds::new(-8.0, -4.0, 20.0, 0.0));
+
+        let motor = definition(SymbolId::Motor);
+        assert_eq!(
+            motor
+                .ports
+                .iter()
+                .map(|p| (p.role.as_str(), p.anchor))
+                .collect::<Vec<_>>(),
+            [
+                ("U", GridPoint::new(-2, -3)),
+                ("V", GridPoint::new(0, -3)),
+                ("W", GridPoint::new(2, -3)),
+                ("PE", GridPoint::new(4, 0)),
+            ]
+        );
+        assert_eq!(motor.graphics[0], circle(0.0, 0.0, 9.0));
+        assert_eq!(
+            &motor.graphics[1..4],
+            &[
+                line((-8.0, -12.0), (-8.0, -4.1231055)),
+                line((0.0, -12.0), (0.0, -9.0)),
+                line((8.0, -12.0), (8.0, -4.1231055)),
+            ]
+        );
+        assert!(motor.graphics[1..4].iter().all(|graphic| match graphic {
+            GraphicPrimitive::Line(a, b) => a.x == b.x,
+            _ => false,
+        }));
+        assert_eq!(motor.bounds, Bounds::new(-9.0, -12.0, 20.0, 8.0));
     }
 }

@@ -1,6 +1,7 @@
 use super::{
-    geometry::{GridPoint, Point},
+    geometry::{Bounds, GridPoint, Point},
     symbols::SymbolId,
+    topology::PageTopology,
 };
 use crate::mvp_model::Endpoint;
 
@@ -51,7 +52,16 @@ pub struct SymbolInstance {
     pub origin: GridPoint,
     pub page_index: usize,
     pub pole_index: Option<usize>,
+    pub feeder_index: Option<usize>,
     pub zone: String,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoleGroup {
+    pub device: usize,
+    pub feeder_index: usize,
+    pub members: [usize; 3],
+    pub bounds: Bounds,
+    pub tag_anchor: Point,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireRoute {
@@ -59,17 +69,39 @@ pub struct WireRoute {
     pub to: Endpoint,
     pub points: Vec<GridPoint>,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PageDrawing {
     pub title: String,
+    pub topology: PageTopology,
     pub commands: Vec<DrawCommand>,
     pub symbols: Vec<SymbolInstance>,
+    pub pole_groups: Vec<PoleGroup>,
     pub wires: Vec<WireRoute>,
     pub junctions: Vec<Point>,
 }
 impl PageDrawing {
     pub fn snapshot(&self, project: &crate::mvp_model::Project) -> String {
         let mut s = format!("Page {}\n", self.title);
+        for feeder in &self.topology.feeders {
+            s.push_str(&format!(
+                "MotorFeeder {} -> {} -> {} pitch {}mm\n",
+                project.devices[feeder.supply].tag,
+                project.devices[feeder.switch].tag,
+                project.devices[feeder.motor].tag,
+                super::placement::PHASE_PITCH_COLS as f32 * super::geometry::GRID_MM
+            ));
+        }
+        for group in &self.pole_groups {
+            s.push_str(&format!(
+                "PoleGroup {} feeder {} bounds ({:.0},{:.0})-({:.0},{:.0})\n",
+                project.devices[group.device].tag,
+                group.feeder_index,
+                group.bounds.left,
+                group.bounds.top,
+                group.bounds.right,
+                group.bounds.bottom
+            ));
+        }
         for i in &self.symbols {
             s.push_str(&format!(
                 "Symbol {} {:?} {:?} @ ({},{}) zone {}\n",

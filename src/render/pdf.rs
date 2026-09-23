@@ -365,6 +365,11 @@ mod tests {
     fn embeds_unicode_text_and_a4_page() {
         let page = PageDrawing {
             title: "Résumé Ω".into(),
+            topology: super::super::topology::PageTopology {
+                nets: vec![],
+                feeders: vec![],
+                bundles: vec![],
+            },
             commands: vec![DrawCommand::Text {
                 at: Point::new(20.0, 20.0),
                 size: 3.0,
@@ -372,6 +377,7 @@ mod tests {
                 align: TextAlign::Center,
             }],
             symbols: vec![],
+            pole_groups: vec![],
             wires: vec![],
             junctions: vec![],
         };

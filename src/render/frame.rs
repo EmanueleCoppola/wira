@@ -1,7 +1,8 @@
 use super::{
     drawing::{DrawCommand, TextAlign, PAGE_H_MM, PAGE_W_MM},
-    geometry::Point,
+    geometry::{Bounds, Point},
 };
+pub const CONTENT: Bounds = Bounds::new(14.0, 14.0, 283.0, 179.0);
 fn p(x: f32, y: f32) -> Point {
     Point::new(x, y)
 }
@@ -28,8 +29,8 @@ pub fn draw(project: &str, title: &str, index: usize, total: usize) -> Vec<DrawC
             width: 0.35,
         },
         DrawCommand::Rect {
-            origin: p(14.0, 14.0),
-            size: p(PAGE_W_MM - 28.0, 165.0),
+            origin: p(CONTENT.left, CONTENT.top),
+            size: p(CONTENT.right - CONTENT.left, CONTENT.bottom - CONTENT.top),
             width: 0.25,
         },
     ];

@@ -5,6 +5,7 @@ pub mod pdf;
 pub mod placement;
 pub mod routing;
 pub mod symbols;
+pub mod topology;
 
 use crate::mvp_model::{Kind, Project};
 use drawing::{DrawCommand, PageDrawing, SymbolInstance, TextAlign};
@@ -17,12 +18,24 @@ pub fn layout(project: &Project) -> Vec<PageDrawing> {
         .iter()
         .enumerate()
         .map(|(index, page)| {
-            let symbols = placement::place(project, page, index);
-            let wires = routing::route_page(project, index, &symbols);
+            let topology = topology::analyze(project, index);
+            let symbols = placement::place(project, page, index, &topology);
+            let pole_groups = placement::pole_groups(&symbols, &topology);
+            let wires = routing::route_page(project, index, &symbols, &topology);
             let (wire_commands, junctions) = routing::draw_wires(&wires);
             let mut commands = frame::draw(&project.name, &page.name, index, project.pages.len());
             for instance in &symbols {
                 draw_symbol(&mut commands, project, instance);
+            }
+            for group in &pole_groups {
+                text(
+                    &mut commands,
+                    group.tag_anchor.x,
+                    group.tag_anchor.y,
+                    3.1,
+                    &project.devices[group.device].tag,
+                    TextAlign::Right,
+                );
             }
             commands.extend(wire_commands);
             for p in &junctions {
@@ -35,8 +48,10 @@ pub fn layout(project: &Project) -> Vec<PageDrawing> {
             }
             PageDrawing {
                 title: page.name.clone(),
+                topology,
                 commands,
                 symbols,
+                pole_groups,
                 wires,
                 junctions,
             }
@@ -127,10 +142,10 @@ fn draw_symbol(c: &mut Vec<DrawCommand>, project: &Project, i: &SymbolInstance) 
             text(c, o.x, o.y + 1.0, 4.0, "M", TextAlign::Center);
             text(c, o.x, o.y + 6.0, 2.5, "3~", TextAlign::Center);
         }
-        SymbolId::ContactorContact => {
+        SymbolId::ContactorContact if i.feeder_index.is_none() => {
             if let Kind::Contactor { poles, .. } = &d.kind {
                 if i.pole_index == Some(poles.len() / 2) {
-                    text(c, o.x + 8.0, o.y, 3.1, &d.tag, TextAlign::Left);
+                    text(c, o.x + 9.0, o.y, 3.1, &d.tag, TextAlign::Left);
                 }
             }
         }
@@ -163,8 +178,15 @@ fn draw_symbol(c: &mut Vec<DrawCommand>, project: &Project, i: &SymbolInstance) 
             symbols::PortDirection::Right => {
                 text(c, p.x - 1.2, p.y - 1.2, 2.1, actual, TextAlign::Right)
             }
-            symbols::PortDirection::Up => text(c, p.x, p.y - 2.0, 2.1, actual, TextAlign::Center),
-            symbols::PortDirection::Down => text(c, p.x, p.y + 3.2, 2.1, actual, TextAlign::Center),
+            symbols::PortDirection::Up if i.symbol == SymbolId::ContactorContact => {
+                text(c, p.x - 1.2, p.y - 1.0, 1.9, actual, TextAlign::Right)
+            }
+            symbols::PortDirection::Down if i.symbol == SymbolId::ContactorContact => {
+                text(c, p.x - 1.2, p.y + 1.8, 1.9, actual, TextAlign::Right)
+            }
+            symbols::PortDirection::Up | symbols::PortDirection::Down => {
+                text(c, p.x + 1.2, p.y + 0.8, 1.9, actual, TextAlign::Left)
+            }
         }
     }
 }
