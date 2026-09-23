@@ -1,8 +1,11 @@
 use std::{fs, path::PathBuf, process::Command};
 use wira::{
     compile,
-    mvp_layout::{self, Function},
     mvp_model::Kind,
+    render::{
+        self,
+        drawing::{DrawCommand, Function},
+    },
 };
 
 fn example() -> PathBuf {
@@ -40,11 +43,23 @@ fn example_semantics_and_layout() {
         7,
         "poles must not become external wires"
     );
-    let pages = mvp_layout::layout(&project);
-    assert!(pages[0].functions.contains(&Function::Coil(km)));
-    assert!(!pages[0].functions.contains(&Function::Poles(km)));
-    assert!(pages[1].functions.contains(&Function::Poles(km)));
-    assert!(!pages[1].functions.contains(&Function::Coil(km)));
+    let pages = render::layout(&project);
+    assert!(pages[0]
+        .symbols
+        .iter()
+        .any(|s| s.function == Function::Coil(km)));
+    assert!(!pages[0]
+        .symbols
+        .iter()
+        .any(|s| s.function == Function::Poles(km)));
+    assert!(pages[1]
+        .symbols
+        .iter()
+        .any(|s| s.function == Function::Poles(km)));
+    assert!(!pages[1]
+        .symbols
+        .iter()
+        .any(|s| s.function == Function::Coil(km)));
 }
 
 #[test]
@@ -56,8 +71,15 @@ fn pdf_build_is_valid_and_deterministic() {
     assert!(a.len() > 2000);
     let text = String::from_utf8_lossy(&a);
     assert_eq!(text.matches("/Type /Page\n").count(), 2);
+    let pages = render::layout(&compile(&example()).unwrap());
     for expected in ["Motor Starter", "Control", "Power", "PLC1", "KM1", "M1"] {
-        assert!(text.contains(expected), "missing {expected}");
+        assert!(
+            pages
+                .iter()
+                .flat_map(|p| &p.commands)
+                .any(|c| matches!(c, DrawCommand::Text { text, .. } if text == expected)),
+            "missing {expected}"
+        );
     }
 }
 
