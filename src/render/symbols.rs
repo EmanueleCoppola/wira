@@ -135,9 +135,11 @@ pub fn definition(id: SymbolId) -> SymbolDefinition {
             Bounds::new(-9.0, -12.0, 20.0, 8.0),
             vec![
                 circle(0.0, 0.0, 9.0),
-                line((-8.0, -12.0), (-8.0, -4.1231055)),
+                line((-8.0, -12.0), (-8.0, -8.5)),
+                line((-8.0, -8.5), (-6.0, -6.708204)),
                 line((0.0, -12.0), (0.0, -9.0)),
-                line((8.0, -12.0), (8.0, -4.1231055)),
+                line((8.0, -12.0), (8.0, -8.5)),
+                line((8.0, -8.5), (6.0, -6.708204)),
                 line((9.0, 0.0), (16.0, 0.0)),
                 line((16.0, 0.0), (16.0, 4.0)),
                 line((12.0, 4.0), (20.0, 4.0)),
@@ -265,17 +267,21 @@ mod tests {
         );
         assert_eq!(motor.graphics[0], circle(0.0, 0.0, 9.0));
         assert_eq!(
-            &motor.graphics[1..4],
+            &motor.graphics[1..6],
             &[
-                line((-8.0, -12.0), (-8.0, -4.1231055)),
+                line((-8.0, -12.0), (-8.0, -8.5)),
+                line((-8.0, -8.5), (-6.0, -6.708204)),
                 line((0.0, -12.0), (0.0, -9.0)),
-                line((8.0, -12.0), (8.0, -4.1231055)),
+                line((8.0, -12.0), (8.0, -8.5)),
+                line((8.0, -8.5), (6.0, -6.708204)),
             ]
         );
-        assert!(motor.graphics[1..4].iter().all(|graphic| match graphic {
-            GraphicPrimitive::Line(a, b) => a.x == b.x,
-            _ => false,
-        }));
+        for graphic in [motor.graphics[2], motor.graphics[5]] {
+            let GraphicPrimitive::Line(_, end) = graphic else {
+                unreachable!()
+            };
+            assert!((end.x * end.x + end.y * end.y - 81.0).abs() < 0.001);
+        }
         assert_eq!(motor.bounds, Bounds::new(-9.0, -12.0, 20.0, 8.0));
     }
 }
